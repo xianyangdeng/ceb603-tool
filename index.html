@@ -791,7 +791,7 @@ function loadClientList() {
                 return;
             }
             bar.className = 'ok';
-            bar.textContent = `✅ 客户列表已加载（共 ${clientList.length} 家中山客户），生成报文时将校验 agentCode`;
+            bar.textContent = `✅ 本工具只对中山客户使用，只作报文格式转换，不作申报内容校验`;
         })
         .catch(err => {
             bar.className = 'err';
