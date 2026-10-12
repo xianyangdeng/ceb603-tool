@@ -65,7 +65,7 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
 <div id="loginMask">
     <div class="login-box">
         <h2>🔐 客户校验登录</h2>
-        <p class="login-desc">请输入您在客户列表中的<strong>海关编码</strong>进行身份验证</p>
+        <p class="login-desc">请输入您的<strong>海关编码</strong>进行身份验证</p>
         <div class="login-row">
             <label for="customsCodeInput">海关编码：</label>
             <input type="text" id="customsCodeInput" placeholder="请输入海关编码" autocomplete="off">
@@ -844,7 +844,7 @@ function loadClientList() {
             }
             statusEl.className = 'login-status ok';
             statusEl.textContent = `客户列表加载成功，请输入公司海关编码登录`;
-            document.getElementById('loginHint').textContent = '提示：本工具仅限客户列表内的企业使用，登录后可生成报文';
+            document.getElementById('loginHint').textContent = '提示：本工具仅限中山协议客户使用，登录后可生成报文';
             const input = document.getElementById('customsCodeInput');
             input.focus();
         })
