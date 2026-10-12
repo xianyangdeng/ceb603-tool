@@ -843,7 +843,7 @@ function loadClientList() {
                 return;
             }
             statusEl.className = 'login-status ok';
-            statusEl.textContent = `客户列表加载成功，请输入海关编码登录`;
+            statusEl.textContent = `客户列表加载成功，请输入公司海关编码登录`;
             document.getElementById('loginHint').textContent = '提示：本工具仅限客户列表内的企业使用，登录后可生成报文';
             const input = document.getElementById('customsCodeInput');
             input.focus();
