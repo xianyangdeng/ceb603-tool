@@ -37,12 +37,10 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
 .batch-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .batch-tab { padding: 4px 12px; border: 1px solid #2b5c8a; background: #fff; color: #2b5c8a; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .batch-tab.active { background: #2b5c8a; color: #fff; }
-
 /* ===== 客户列表加载状态栏（仅后台校验，无需登录） ===== */
 .client-bar { font-size: 12px; padding: 5px 30px; background: #fff8e6; color: #b7791f; border-bottom: 1px solid #f0e0c0; }
 .client-bar.ok { background: #e7f7ee; color: #1e7e34; border-bottom-color: #c8e6d0; }
 .client-bar.err { background: #fde8e8; color: #c00; border-bottom-color: #f5c2c2; }
-
 /* ===== 报文类型识别提示 ===== */
 .type-badge { display: inline-block; padding: 2px 10px; border-radius: 3px; font-size: 12px; font-weight: bold; margin-left: 8px; }
 .type-badge.order { background: #e7f3ff; color: #1a3a5c; border: 1px solid #1a3a5c; }
@@ -50,15 +48,12 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
 </style>
 </head>
 <body>
-
 <!-- ===== 客户列表状态提示（仅后台校验，无需登录） ===== -->
 <div id="clientBar" class="client-bar">客户列表加载中...</div>
-
 <div class="header">
     <h1>9610 报文生成工具（订单 CEB303 / 清单 CEB603）<span id="typeBadge"></span></h1>
     <p>根据模板自动识别订单/清单 → 自动填充派生字段 → 生成标准 XML（每批 ≤99 单自动拆分 · CDATA · UTF-8无BOM）</p>
 </div>
-
 <div class="toolbar">
     <label>1.</label>
     <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">选择 Excel 文件</button>
@@ -69,9 +64,7 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
     <label style="margin-left:15px;">3.</label>
     <button class="btn btn-primary" id="dlBtn" onclick="downloadXML()" disabled>下载 XML</button>
 </div>
-
 <div class="status info" id="status">请先选择 Excel 模板文件</div>
-
 <div class="main">
     <div class="panel">
         <div class="panel-head"><span>📊 数据预览</span></div>
@@ -90,14 +83,12 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
         </div>
     </div>
 </div>
-
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 const BATCH_LIMIT = 99;          // 每个报文最多包含的订单数（≤99）
 let excelData = null;
 let batchXMLs = [];              // 拆分后的多份报文：[{name, xml}, ...]
-
 document.getElementById('fileInput').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -117,24 +108,50 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
     };
     reader.readAsArrayBuffer(file);
 });
-
 /**
  * 自动识别模板类型：
  *   - 订单模板（CEB303）：包含「电子订单」和「电子订单商品信息」两个 Sheet
  *   - 清单模板（CEB603）：包含「清单表头」和「清单商品明细」两个 Sheet
  * 返回 'order' | 'inventory' | null
  */
+/**
+ * 自动识别模板类型。
+ * 订单模板（CEB303）支持两种 Sheet 命名（自动选取）：
+ *   新规范：电子订单头 + 电子订单明细 + 订单商品
+ *   旧规范：电子订单   + 电子订单商品信息
+ * 清单模板（CEB603）：
+ *   清单表头 + 清单商品明细（+ 传输信息）
+ * 返回 { type, headSheet, listSheet, headType }，
+ * 其中 headType = 'shared' 表示电子订单头是「整批共用一份企业信息」的布局，
+ * 订单编号需从「电子订单明细」里读取。
+ */
 function detectType(wb) {
     const names = wb.SheetNames || [];
-    if (names.includes('电子订单') && names.includes('电子订单商品信息')) return 'order';
-    if (names.includes('清单表头') && names.includes('清单商品明细')) return 'inventory';
-    return null;
+    const has = n => names.includes(n);
+    // ---- 清单优先 ----
+    if (has('清单表头') && has('清单商品明细')) {
+        return { type: 'inventory', headSheet: '清单表头', listSheet: '清单商品明细' };
+    }
+    // ---- 订单：新规范（电子订单头 / 电子订单明细 / 订单商品）----
+    const newHead = has('电子订单头');
+    const newDetail = has('电子订单明细');
+    const newGoods = has('订单商品');
+    if (newHead && newDetail && newGoods) {
+        return { type: 'order', headSheet: '电子订单头', listSheet: '电子订单明细',
+                 goodsSheet: '订单商品', headType: 'shared' };
+    }
+    // ---- 订单：旧规范（电子订单 / 电子订单商品信息）----
+    if (has('电子订单') && has('电子订单商品信息')) {
+        return { type: 'order', headSheet: '电子订单', listSheet: '电子订单商品信息',
+                 headType: 'row' };
+    }
+    return { type: null };
 }
-
 /** 订单表头中文列名 → 英文字段名 映射（用于 readSheet 无法直接解析中文表头时做二次映射） */
 const ORDER_HEAD_MAP = {
     '订单类型':         'orderType',
     '电商订单编号':     'orderNo',
+    '订仓单编号':       'orderNo',       // 新规范：电子订单明细里的订单编号字段
     '电商平台企业编号': 'ebpCode',
     '电商平台企业名称': 'ebpName',
     '电商企业编号':     'ebcCode',
@@ -145,6 +162,7 @@ const ORDER_HEAD_MAP = {
 };
 const ORDER_LIST_MAP = {
     '电商订单编号': 'orderNo',
+    '订仓单编号':   'orderNo',       // 新规范：订单商品明细里的订单编号字段
     '序号':         'gnum',
     '企业商品货号': 'itemNo',
     '企业商品名称': 'itemName',
@@ -156,7 +174,6 @@ const ORDER_LIST_MAP = {
     '企业商品描述': 'itemDescribe',
     '条形码':       'barCode'
 };
-
 /**
  * 读取并做字段名映射的通用解析：
  *   - 若单元格表头带 (英文字段名)，优先用英文名
@@ -186,9 +203,9 @@ function readSheetMapped(wb, name, headerRow, map) {
             return obj;
         });
 }
-
 function showPreview(wb) {
-    const type = detectType(wb);
+    const det = detectType(wb);
+    const type = det.type;
     const badge = document.getElementById('typeBadge');
     const genBtn = document.getElementById('genBtn');
     if (type === 'order') {
@@ -196,24 +213,33 @@ function showPreview(wb) {
         badge.textContent = '已识别：订单 CEB303';
         genBtn.textContent = '生成订单报文';
         window._detectedType = 'order';
+        window._detect = det;
     } else if (type === 'inventory') {
         badge.className = 'type-badge inventory';
         badge.textContent = '已识别：清单 CEB603';
         genBtn.textContent = '生成清单报文';
         window._detectedType = 'inventory';
+        window._detect = det;
     } else {
         badge.className = '';
         badge.textContent = '';
         genBtn.textContent = '生成报文';
         window._detectedType = null;
     }
-
     let html = '';
     let sheets = [];
-    if (type === 'order')        sheets = ['电子订单', '电子订单商品信息'];
-    else if (type === 'inventory') sheets = ['清单表头', '清单商品明细', '传输信息'];
-    else                          sheets = wb.SheetNames || [];
-
+    if (type === 'order') {
+        const det = window._detect || detectType(wb);
+        if (det.headType === 'shared') {
+            sheets = [det.headSheet, det.listSheet, det.goodsSheet];
+        } else {
+            sheets = ['电子订单', '电子订单商品信息'];
+        }
+    } else if (type === 'inventory') {
+        sheets = ['清单表头', '清单商品明细', '传输信息'];
+    } else {
+        sheets = wb.SheetNames || [];
+    }
     sheets.forEach(name => {
         if (!wb.SheetNames.includes(name)) return;
         const ws = wb.Sheets[name];
@@ -232,9 +258,8 @@ function showPreview(wb) {
         });
         html += '</table>';
     });
-    document.getElementById('dataPreview').innerHTML = html || '未找到有效数据，或模板类型无法识别（订单需含「电子订单」「电子订单商品信息」，清单需含「清单表头」「清单商品明细」）';
+    document.getElementById('dataPreview').innerHTML = html || '未找到有效数据，或模板类型无法识别（订单需含「电子订单头/电子订单明细/订单商品」或「电子订单/电子订单商品信息」，清单需含「清单表头/清单商品明细」）';
 }
-
 /**
  * 生成带 CDATA 的节点
  * val 为空 → 返回 ''（不生成任何节点）
@@ -245,28 +270,23 @@ function cdataNode(name, val, indent) {
     const escaped = escapeCdata(String(val));
     return `${pad}<ceb:${name}><![CDATA[${escaped}]]></ceb:${name}>\n`;
 }
-
 function escapeCdata(str) {
     return str.includes(']]>') ? str.replace(/\]\]>/g, ']]&gt;') : str;
 }
-
 /** 14 位时间戳 yyyyMMddHHmmss */
 function now14() {
     const d = new Date();
     const p = n => String(n).padStart(2, '0');
     return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
 }
-
 function generateGUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
         const r = Math.random() * 16 | 0;
         return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16).toUpperCase();
     });
 }
-
 /** 俄语西里尔字母检测正则（覆盖俄语主要字母 + 扩展） */
 const RUSSIAN_REGEX = /[\u0400-\u04FF\u0500-\u052F\u2DE0-\u2DFF\uA640-\uA69F]/;
-
 /**
  * 校验 itemNo 是否合法：
  *   1. 不含俄语（西里尔字母）
@@ -284,7 +304,6 @@ function validateItemNo(itemNo) {
     }
     return { ok: reasons.length === 0, reasons };
 }
-
 /**
  * 校验全部清单商品明细的 itemNo，返回错误列表：
  *   [{ orderNo, gnum, itemNo, reasons }]
@@ -307,7 +326,6 @@ function validateAllItemNo(heads, lists) {
     });
     return errors;
 }
-
 /**
  * 生成一个 CEB603Message 报文（包含一批 orderHeads + 对应明细 + transfer）
  * @param {Array}  batchHeads  本批的清单表头数组（≤99）
@@ -322,10 +340,8 @@ function buildMessageXML(batchHeads, listMap, transfers) {
     xml += 'version="1.0"  ';
     xml += 'xmlns:ceb="http://www.chinaport.gov.cn/ceb" ';
     xml += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n';
-
     batchHeads.forEach(head => {
         const orderNo = head.orderNo || '';
-
         // ===== 自动派生字段（按用户要求） =====
         const itemGuid    = generateGUID();
         const appType     = '1';                          // 默认 1=新增
@@ -349,10 +365,8 @@ function buildMessageXML(batchHeads, listMap, transfers) {
         const wrapType    = '2';                          // 默认 2=纸箱
         const packNo      = '1';                          // 默认 1
         const itemDefault = '无';                         // gmodel / barCode 默认值
-
         xml += '    <ceb:Inventory>\n';
         xml += '        <ceb:InventoryHead>\n';
-
         // ===== 清单表头字段（按样例节点顺序）=====
         xml += cdataNode('guid',            itemGuid,          12);
         xml += cdataNode('appType',         appType,           12);
@@ -400,9 +414,7 @@ function buildMessageXML(batchHeads, listMap, transfers) {
         xml += cdataNode('grossWeight',     head.grossWeight,  12);
         xml += cdataNode('netWeight',       head.netWeight,   12);
         xml += cdataNode('note',            head.note,        12);
-
         xml += '        </ceb:InventoryHead>\n';
-
         // ===== 清单商品明细 =====
         const orderLists = listMap[orderNo] || [];
         orderLists.forEach(item => {
@@ -428,10 +440,8 @@ function buildMessageXML(batchHeads, listMap, transfers) {
             xml += cdataNode('note',         item.note,         12);
             xml += '        </ceb:InventoryList>\n';
         });
-
         xml += '    </ceb:Inventory>\n';
     });
-
     // ===== BaseTransfer（每份报文都保留，取第一行传输信息） =====
     const trans = transfers[0] || {};
     xml += '    <ceb:BaseTransfer>\n';
@@ -441,11 +451,9 @@ function buildMessageXML(batchHeads, listMap, transfers) {
     xml += cdataNode('dxpId',    trans.dxpId,    8);
     xml += cdataNode('note',     trans.note,     8);
     xml += '    </ceb:BaseTransfer>\n';
-
     xml += '</ceb:CEB603Message>\n';
     return xml;
 }
-
 /* ============================================================
  * ===== 订单报文 CEB303 构建 =====
  * 模板 Sheet：电子订单（表头）+ 电子订单商品信息（明细）
@@ -453,7 +461,6 @@ function buildMessageXML(batchHeads, listMap, transfers) {
  * 订单报文不做客户校验，仅做基础必填校验 + itemNo 校验。
  * 同样按每批 ≤99 单拆分。
  * ============================================================ */
-
 /**
  * 生成一个 CEB303Message 报文（包含一批订单）
  * 节点顺序与样例一致；空值字段不生成节点。
@@ -466,19 +473,15 @@ function buildOrderMessageXML(batchHeads, listMap, transfers) {
     xml += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ';
     xml += `guid="${msgGuid}" `;
     xml += 'version="1.0">\n';
-
     batchHeads.forEach(head => {
         const orderNo = head.orderNo || '';
-
         // ===== 自动派生字段 =====
         const itemGuid  = generateGUID();
         const appType   = '1';        // 1=新增
         const appTime   = now14();    // 当前时间 14 位
         const appStatus = '2';        // 2=申报
-
         xml += '    <Order>\n';
         xml += '        <OrderHead>\n';
-
         // ===== 订单表头字段（按样例节点顺序）=====
         xml += cdataNode('guid',       itemGuid,           12);
         xml += cdataNode('appType',    appType,            12);
@@ -494,9 +497,7 @@ function buildOrderMessageXML(batchHeads, listMap, transfers) {
         xml += cdataNode('freight',    head.freight,       12);
         xml += cdataNode('currency',   head.currency,      12);
         xml += cdataNode('note',       head.note,          12);
-
         xml += '        </OrderHead>\n';
-
         // ===== 订单商品明细 =====
         const orderLists = listMap[orderNo] || [];
         orderLists.forEach(item => {
@@ -514,40 +515,191 @@ function buildOrderMessageXML(batchHeads, listMap, transfers) {
             xml += cdataNode('note',        item.note,        12);
             xml += '        </OrderList>\n';
         });
-
         xml += '    </Order>\n';
     });
-
-    // ===== BaseTransfer（每份报文都保留，取第一行传输信息） =====
+    // ===== BaseTransfer（有传输信息才生成，避免空壳标签） =====
     const trans = transfers[0] || {};
-    xml += '    <BaseTransfer>\n';
-    xml += cdataNode('copCode',  trans.copCode,  8);
-    xml += cdataNode('copName',  trans.copName,  8);
-    xml += cdataNode('dxpMode',  trans.dxpMode,  8);
-    xml += cdataNode('dxpId',    trans.dxpId,    8);
-    xml += cdataNode('note',     trans.note,     8);
-    xml += '    </BaseTransfer>\n';
-
+    const transChildren = [
+        cdataNode('copCode',  trans.copCode,  8),
+        cdataNode('copName',  trans.copName,  8),
+        cdataNode('dxpMode',  trans.dxpMode,  8),
+        cdataNode('dxpId',    trans.dxpId,    8),
+        cdataNode('note',     trans.note,     8)
+    ].join('');
+    if (transChildren) {
+        xml += '    <BaseTransfer>\n' + transChildren + '    </BaseTransfer>\n';
+    }
     xml += '</CEB303Message>\n';
     return xml;
+    return xml;
 }
-
-/** 读取订单模板数据 */
+/**
+ * 读取订单模板数据，自动适配两种布局：
+ *   shared（新规范）：电子订单头(整批共用企业信息) + 电子订单明细(订单行) + 订单商品(明细)
+ *   row   （旧规范）：电子订单(表头行+订单行) + 电子订单商品信息(明细)
+ * 返回 { heads, lists, transfers }。
+ * heads 的每一项都携带本批共用的 ebcCode/ebcName/ebpCode/ebpName 字段。
+ */
 function readOrderData(wb) {
-    const heads     = readSheetMapped(wb, '电子订单', 4, ORDER_HEAD_MAP);
-    const lists     = readSheetMapped(wb, '电子订单商品信息', 4, ORDER_LIST_MAP);
-    // 订单模板的传输信息若单独成 Sheet 则读取，否则留空数组
-    let transfers   = readSheetMapped(wb, '传输信息', 4, null);
+    const det = window._detect || detectType(wb);
+    let shared = {};      // 整批共用的企业信息（新规范）
+    let heads = [];
+    if (det.headType === 'shared') {
+        // ---- 新规范：企业信息从「电子订单头」固定位置提取 ----
+        shared = readSharedHead(wb, det.headSheet);
+        // 订单行从「电子订单明细」读取
+        heads = readDetailSheet(wb, det.listSheet);
+        // 将共用的企业信息填入每个订单
+        heads = heads.map(h => Object.assign({}, shared, h));
+    } else {
+        // ---- 旧规范：标准表头行+数据行 ----
+        heads = readSheetMapped(wb, '电子订单', 4, ORDER_HEAD_MAP);
+    }
+    // ---- 商品明细：新规范从「订单商品」，旧规范从「电子订单商品信息」----
+    let lists;
+    if (det.headType === 'shared') {
+        lists = readGoodsSheet(wb, det.goodsSheet);
+    } else {
+        lists = readSheetMapped(wb, '电子订单商品信息', 4, ORDER_LIST_MAP);
+    }
+    // 传输信息
+    let transfers = readSheetMapped(wb, '传输信息', 4, null);
     if (!transfers.length) transfers = readSheet(wb, '传输信息', 4);
     return { heads, lists, transfers };
 }
-
+/**
+ * 读取「电子订单头」整批共用的企业信息。
+ * 布局：R000 标题；R001=电商企业编号/电商企业名称；R002=电商平台企业编号/电商平台企业名称；
+ *       R003=进/出口标志/主管海关代码；R004=备注。
+ * 以「标签:」后的下一列为值。
+ */
+function readSharedHead(wb, sheetName) {
+    if (!wb.SheetNames.includes(sheetName)) return {};
+    const ws = wb.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    const result = { ebcCode: '', ebcName: '', ebpCode: '', ebpName: '', ebcCustoms: '' };
+    const findVal = (label) => {
+        for (let r = 0; r < data.length; r++) {
+            const row = data[r];
+            for (let c = 0; c < row.length; c++) {
+                const cell = String(row[c] || '').replace(/[：:]/g, '');
+                if (cell.indexOf(label) !== -1) {
+                    // 优先取同行右侧相邻非空单元格
+                    for (let cc = c + 1; cc < row.length; cc++) {
+                        if (String(row[cc] || '').trim() !== '') return String(row[cc]).trim();
+                    }
+                    // 其次取下一行第一列
+                    if (r + 1 < data.length) return String(data[r + 1][0] || '').trim();
+                    return '';
+                }
+            }
+        }
+        return '';
+    };
+    const ebcCode = findVal('电商企业编号');
+    const ebcName = findVal('电商企业名称');
+    const ebpCode = findVal('电商平台企业编号');
+    const ebpName = findVal('电商平台企业名称');
+    // NULL / 空 统一置空
+    const clean = v => (v === '' || v.toUpperCase() === 'NULL') ? '' : v;
+    return {
+        ebcCode: clean(ebcCode),
+        ebcName: clean(ebcName),
+        ebpCode: clean(ebpCode),
+        ebpName: clean(ebpName)
+    };
+}
+/**
+ * 读取「电子订单明细」订单行。
+ * R000 为标题行，R001 为合并表头行（订单类型/电商订单编号/商品金额/运杂费/币制），R002 起为数据。
+ */
+function readDetailSheet(wb, sheetName) {
+    if (!wb.SheetNames.includes(sheetName)) return [];
+    const ws = wb.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    // 找到表头行：含「订仓单编号」或「电商订单编号」或「订单类型」的行
+    let headerRow = -1;
+    for (let r = 0; r < Math.min(data.length, 6); r++) {
+        const line = data[r].map(String).join(' ');
+        if (line.indexOf('订仓单编号') !== -1 || line.indexOf('电商订单编号') !== -1 || line.indexOf('订单类型') !== -1) {
+            headerRow = r;
+            break;
+        }
+    }
+    if (headerRow === -1 || headerRow + 1 >= data.length) return [];
+    const fieldRow = data[headerRow];
+    // 处理合并单元格：一个单元格内用换行分隔两个字段名，例如
+    //   "电商订单/海外仓\n订仓单编号"
+    // 数据行只有一列值，该值属于【第二个字段】（真正的列名），
+    // 第一个是冗余的合并表头标题。因此每个单元格只保留换行后的【最后一段】作为列名。
+    const fields = fieldRow.map(c => {
+        const parts = String(c == null ? '' : c).split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+        if (!parts.length) return '';
+        return parts[parts.length - 1];   // 取最后一段作为真实列名
+    });
+    const rows = data.slice(headerRow + 1);
+    return rows
+        .filter(row => row.some(c => c !== '' && c !== undefined))
+        .map(row => {
+            const obj = {};
+            fields.forEach((key, i) => {
+                if (!key) return;
+                // 兼容合并单元格里被拆到多个列的情况：取第一个非空有效字段名
+                let fieldName = key;
+                // 中文表头走映射
+                if (ORDER_HEAD_MAP[fieldName]) fieldName = ORDER_HEAD_MAP[fieldName];
+                obj[fieldName] = row[i] !== undefined ? String(row[i]) : '';
+            });
+            return obj;
+        });
+}
+/**
+ * 读取「订单商品」明细行。
+ * R000/R001 为合并表头，R002 起为数据：订单编号/序号/货号/名称/单位/币制/数量/单价/总价/描述/条形码/备注。
+ */
+function readGoodsSheet(wb, sheetName) {
+    if (!wb.SheetNames.includes(sheetName)) return [];
+    const ws = wb.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    // 找表头行：含「企业商品货号」或「序号」或「企业商品名称」的行
+    let headerRow = -1;
+    for (let r = 0; r < Math.min(data.length, 6); r++) {
+        const line = data[r].map(String).join(' ');
+        if (line.indexOf('企业商品货号') !== -1 || line.indexOf('企业商品名称') !== -1 || line.indexOf('序号') !== -1) {
+            headerRow = r;
+            break;
+        }
+    }
+    if (headerRow === -1 || headerRow + 1 >= data.length) return [];
+    const fieldRow = data[headerRow];
+    // 处理合并单元格：一个单元格内用换行分隔两个字段名，例如
+    //   "电商订单/海外仓\n订仓单编号"
+    // 数据行只有一列值，该值属于【第二个字段】（真正的列名），
+    // 第一个是冗余的合并表头标题。因此每个单元格只保留换行后的【最后一段】作为列名。
+    const fields = fieldRow.map(c => {
+        const parts = String(c == null ? '' : c).split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+        if (!parts.length) return '';
+        return parts[parts.length - 1];   // 取最后一段作为真实列名
+    });
+    const rows = data.slice(headerRow + 1);
+    return rows
+        .filter(row => row.some(c => c !== '' && c !== undefined))
+        .map(row => {
+            const obj = {};
+            fields.forEach((key, i) => {
+                if (!key) return;
+                let fieldName = key;
+                if (ORDER_LIST_MAP[fieldName]) fieldName = ORDER_LIST_MAP[fieldName];
+                obj[fieldName] = row[i] !== undefined ? String(row[i]) : '';
+            });
+            return obj;
+        });
+}
 function generateXML() {
     if (!excelData) return;
     try {
         const type = window._detectedType || detectType(excelData);
         if (!type) throw new Error('无法识别模板类型：请确认模板含「电子订单/电子订单商品信息」（订单 CEB303）或「清单表头/清单商品明细」（清单 CEB603）');
-
         if (type === 'order') {
             return generateOrderXML();
         } else {
@@ -557,7 +709,6 @@ function generateXML() {
         setStatus('生成失败: ' + err.message, 'err');
     }
 }
-
 /**
  * 生成清单报文 CEB603（含客户校验）
  */
@@ -568,29 +719,22 @@ function generateInventoryXML() {
     if (!heads.length) throw new Error('清单表头无数据');
     if (!lists.length) throw new Error('清单商品明细无数据');
     if (!transfers.length) throw new Error('传输信息无数据');
-
     // ===== 校验清单表头 agentCode 是否都在客户列表 clients.csv 中 =====
     const agentErrors = validateAgentCode(heads);
-
     // ===== 必填项校验 =====
     const dataBySheet = { '清单表头': heads, '清单商品明细': lists, '传输信息': transfers };
     const requiredErrors = validateRequired(dataBySheet);
-
     // ===== 校验 itemNo：禁止俄语 / 禁止超 20 字符 =====
     const itemNoErrors = validateAllItemNo(heads, lists);
-
     // 任一校验不通过 → 合并提示，中止报文生成
     if (agentErrors.length || requiredErrors.length || itemNoErrors.length) {
         const parts = [];
-
         if (agentErrors.length) {
             parts.push(formatAgentErrors(agentErrors));
         }
-
         if (requiredErrors.length) {
             parts.push('【必填项缺失】\n' + formatRequiredErrors(requiredErrors));
         }
-
         if (itemNoErrors.length) {
             const byOrder = {};
             itemNoErrors.forEach(e => {
@@ -610,12 +754,10 @@ function generateInventoryXML() {
                 lines.join('\n')
             );
         }
-
         const totalIssues = requiredErrors.length + agentErrors.length + itemNoErrors.length;
         const msg =
             `❌ 校验未通过：共发现 ${totalIssues} 处问题，请修改后重试，本次未生成报文。\n\n` +
             parts.join('\n\n');
-
         // 清空上次结果
         batchXMLs = [];
         renderPreview();
@@ -623,7 +765,6 @@ function generateInventoryXML() {
         setStatus(msg, 'err');
         return; // 中止报文生成
     }
-
     // 按 orderNo 将明细分组
     const listMap = {};
     lists.forEach(row => {
@@ -632,7 +773,6 @@ function generateInventoryXML() {
         if (!listMap[orderNo]) listMap[orderNo] = [];
         listMap[orderNo].push(row);
     });
-
     // ===== 按每批 ≤99 单拆分 =====
     batchXMLs = [];
     const totalOrders = heads.length;
@@ -646,10 +786,8 @@ function generateInventoryXML() {
             xml: xml
         });
     }
-
     // ===== 渲染预览（含批次切换标签） =====
     renderPreview();
-
     const totalBatches = batchXMLs.length;
     document.getElementById('dlBtn').disabled = false;
     setStatus(
@@ -658,30 +796,29 @@ function generateInventoryXML() {
         'ok'
     );
 }
-
 /**
  * 生成订单报文 CEB303（不做客户校验，仅做必填项 + itemNo 校验）
  */
 function generateOrderXML() {
+    const det = window._detect || detectType(excelData);
     const { heads, lists, transfers } = readOrderData(excelData);
-    if (!heads.length) throw new Error('电子订单无数据');
-    if (!lists.length) throw new Error('电子订单商品信息无数据');
-
-    // ===== 必填项校验（订单） =====
-    const dataBySheet = { '电子订单': heads, '电子订单商品信息': lists };
+    const orderSheetLabel = (det.headType === 'shared') ? det.listSheet : '电子订单';
+    const goodsSheetLabel = (det.headType === 'shared') ? det.goodsSheet : '电子订单商品信息';
+    if (!heads.length) throw new Error('「' + orderSheetLabel + '」无有效订单数据');
+    if (!lists.length) throw new Error('「' + goodsSheetLabel + '」无有效商品明细数据');
+    // ===== 必填项校验（订单，按实际 Sheet 名） =====
+    const dataBySheet = {};
+    dataBySheet[orderSheetLabel] = heads;
+    dataBySheet[goodsSheetLabel] = lists;
     const requiredErrors = validateOrderRequired(dataBySheet);
-
     // ===== 校验 itemNo：禁止俄语 / 禁止超 20 字符 =====
     const itemNoErrors = validateAllOrderItemNo(heads, lists);
-
     // 任一校验不通过 → 合并提示，中止报文生成
     if (requiredErrors.length || itemNoErrors.length) {
         const parts = [];
-
         if (requiredErrors.length) {
             parts.push('【必填项缺失】\n' + formatOrderRequiredErrors(requiredErrors));
         }
-
         if (itemNoErrors.length) {
             const byOrder = {};
             itemNoErrors.forEach(e => {
@@ -701,19 +838,16 @@ function generateOrderXML() {
                 lines.join('\n')
             );
         }
-
         const totalIssues = requiredErrors.length + itemNoErrors.length;
         const msg =
             `❌ 校验未通过：共发现 ${totalIssues} 处问题，请修改后重试，本次未生成报文。\n\n` +
             parts.join('\n\n');
-
         batchXMLs = [];
         renderPreview();
         document.getElementById('dlBtn').disabled = true;
         setStatus(msg, 'err');
         return;
     }
-
     // 按 orderNo 将明细分组
     const listMap = {};
     lists.forEach(row => {
@@ -722,7 +856,6 @@ function generateOrderXML() {
         if (!listMap[orderNo]) listMap[orderNo] = [];
         listMap[orderNo].push(row);
     });
-
     // ===== 按每批 ≤99 单拆分 =====
     batchXMLs = [];
     const totalOrders = heads.length;
@@ -736,7 +869,6 @@ function generateOrderXML() {
             xml: xml
         });
     }
-
     renderPreview();
     const totalBatches = batchXMLs.length;
     document.getElementById('dlBtn').disabled = false;
@@ -746,7 +878,6 @@ function generateOrderXML() {
         'ok'
     );
 }
-
 /** 渲染预览区域 + 批次切换标签 */
 function renderPreview() {
     const tabsEl = document.getElementById('batchTabs');
@@ -771,7 +902,6 @@ function renderPreview() {
         });
     });
 }
-
 function readSheet(wb, name, headerRow) {
     if (!wb.SheetNames.includes(name)) return [];
     const ws = wb.Sheets[name];
@@ -794,7 +924,6 @@ function readSheet(wb, name, headerRow) {
             return obj;
         });
 }
-
 /**
  * ===== 必填项校验 =====
  * 定义每个 Sheet 中「用户必须填写」的字段清单。
@@ -832,14 +961,12 @@ const REQUIRED_FIELDS = {
         { name: 'dxpId',   label: '报文传输编号' }
     ]
 };
-
 /** 判断一个单元格值是否为「空」：空串/undefined/null/纯空白/纯空标签 均视为空 */
 function isEmptyCell(val) {
     if (val === undefined || val === null) return true;
     const s = String(val).trim();
     return s === '';
 }
-
 /**
  * 对一份数据做必填项校验，返回错误列表：
  *   [{ sheet, orderNo, gnum, fieldName, label, value }]
@@ -866,7 +993,6 @@ function validateRequired(dataBySheet) {
     });
     return errors;
 }
-
 /**
  * 把必填项校验错误汇总为可读的提示文本
  *  - 表头/传输信息：按 Sheet + 行号 + 字段 汇总
@@ -885,7 +1011,6 @@ function formatRequiredErrors(errors) {
     });
     return lines.join('\n');
 }
-
 /* ============================================================
  * ===== 订单必填项校验（CEB303，不做客户校验）=====
  * 排除项：gmodel / barCode / currency 不校验（按你此前约定）
@@ -913,7 +1038,6 @@ const ORDER_REQUIRED_FIELDS = {
         { name: 'totalPrice', label: '总价' }
     ]
 };
-
 function validateOrderRequired(dataBySheet) {
     const errors = [];
     Object.keys(ORDER_REQUIRED_FIELDS).forEach(sheetName => {
@@ -936,7 +1060,6 @@ function validateOrderRequired(dataBySheet) {
     });
     return errors;
 }
-
 function formatOrderRequiredErrors(errors) {
     const lines = [`共 ${errors.length} 处必填项未填写：`];
     errors.forEach(e => {
@@ -947,7 +1070,6 @@ function formatOrderRequiredErrors(errors) {
     });
     return lines.join('\n');
 }
-
 /** 校验订单商品明细的 itemNo（禁止俄语 / 超 20 字符） */
 function validateAllOrderItemNo(heads, lists) {
     const errors = [];
@@ -966,7 +1088,6 @@ function validateAllOrderItemNo(heads, lists) {
     });
     return errors;
 }
-
 /** 下载：单份直接下载，多份打包为 ZIP */
 function downloadXML() {
     if (!batchXMLs.length) return;
@@ -996,7 +1117,6 @@ function downloadXML() {
         URL.revokeObjectURL(url);
     });
 }
-
 function downloadSingle(fileName, xml) {
     const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -1008,13 +1128,11 @@ function downloadSingle(fileName, xml) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
-
 function setStatus(msg, type) {
     const el = document.getElementById('status');
     el.className = type;
     el.textContent = msg;
 }
-
 /* ============================================================
  * ===== 客户登录校验 =====
  * 客户列表：第一列海关编码、第二列单位名称，见 clients.csv
@@ -1026,9 +1144,7 @@ function setStatus(msg, type) {
  *      - 匹配失败 → 提示"海关编码不在客户列表中"
  *   4. 生成报文时，校验模板中 agentCode 是否与登录海关编码一致
  * ============================================================ */
-
 let clientList = [];        // [{customsCode, companyName}, ...] 中山客户列表（clients.csv）
-
 /**
  * 规范化客户列表中的海关编码，用于比对：
  *   - 去前后空白
@@ -1041,12 +1157,10 @@ function normCode(code) {
     s = s.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1'); // 去尾零 1105910159.00 → 1105910159
     return s;
 }
-
 /** 比对两个海关编码是否一致（规范化后） */
 function codeEqual(a, b) {
     return normCode(a) !== '' && normCode(a) === normCode(b);
 }
-
 /**
  * 解析 CSV 文本（支持 UTF-8 BOM、逗号/制表符分隔、双引号转义）
  * 跳过空行和纯注释行（# 开头）
@@ -1074,7 +1188,6 @@ function parseCSV(text) {
     }
     return rows;
 }
-
 /** 按 RFC 4180 规则拆分一行 CSV（处理引号内逗号） */
 function splitCSVLine(line) {
     const result = [];
@@ -1098,7 +1211,6 @@ function splitCSVLine(line) {
     result.push(cur);
     return result;
 }
-
 /** 查找客户：返回 {customsCode, companyName} 或 null */
 function findClient(code) {
     const target = normCode(code);
@@ -1108,7 +1220,6 @@ function findClient(code) {
     }
     return null;
 }
-
 /* ============================================================
  * ===== agentCode 客户列表校验 =====
  * 去掉登录环节：不再要求用户输入海关编码登录。
@@ -1133,7 +1244,6 @@ function validateAgentCode(heads) {
     });
     return errors;
 }
-
 /* ============================================================
  * 校验结果展示：把 agentCode 校验错误格式化为用户提示
  * ============================================================ */
@@ -1151,7 +1261,6 @@ function formatAgentErrors(errors) {
     });
     return `【非中山客户】共 ${errors.length} 条清单的 agentCode 不在客户列表中，拒绝转换：\n` + lines.join('\n');
 }
-
 /** 初始化：后台加载客户列表 CSV（不弹登录框，仅用于校验） */
 function loadClientList() {
     const bar = document.getElementById('clientBar');
@@ -1177,7 +1286,6 @@ function loadClientList() {
             bar.textContent = '⚠️ 客户列表加载失败：' + err.message + '。若以本地文件双击打开，请用 serve.bat / serve.sh 启动 HTTP 服务';
         });
 }
-
 // 页面加载后自动后台加载客户列表
 loadClientList();
 </script>
