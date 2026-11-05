@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>9610 报文生成工具（订单 CEB303 / 清单 CEB603）测试1.1</title>
+<title>9610 报文生成工具（清单 CEB603 + 订单 CEB303）</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; background: #f0f2f5; color: #333; }
@@ -18,6 +18,8 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
 .btn-primary:hover { background: #1a3a5c; }
 .btn-success { background: #28a745; color: #fff; }
 .btn-success:hover { background: #1e7e34; }
+.btn-warning { background: #fd7e14; color: #fff; }
+.btn-warning:hover { background: #e8590c; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .status { padding: 10px 30px; font-size: 13px; min-height: 20px; white-space: pre-line; line-height: 1.6; }
 .status.info { background: #e7f3ff; color: #1a3a5c; }
@@ -51,8 +53,8 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
 <!-- ===== 客户列表状态提示（仅后台校验，无需登录） ===== -->
 <div id="clientBar" class="client-bar">客户列表加载中...</div>
 <div class="header">
-    <h1>9610 报文生成工具（订单 CEB303 / 清单 CEB603）1.1<span id="typeBadge"></span></h1>
-    <p>根据模板自动识别订单/清单 → 自动填充派生字段 → 生成标准 XML（每批 ≤99 单自动拆分 · CDATA · UTF-8无BOM）</p>
+    <h1>9610 报文生成工具（订单 CEB303 / 清单 CEB603）<span id="typeBadge"></span></h1>
+    <p>同一份清单模板可同时生成「清单报文 CEB603」和「订单报文 CEB303」→ 自动填充派生字段 → 生成标准 XML（每批 ≤99 单自动拆分 · CDATA · UTF-8无BOM）</p>
 </div>
 <div class="toolbar">
     <label>1.</label>
@@ -60,7 +62,10 @@ body { font-family: 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; backgroun
     <input type="file" id="fileInput" accept=".xlsx,.xls">
     <span id="fileName" style="font-size:13px;color:#666;"></span>
     <label style="margin-left:15px;">2.</label>
-    <button class="btn btn-success" id="genBtn" onclick="generateXML()" disabled>生成报文</button>
+    <span id="btnGroup" style="display:inline-flex;gap:10px;align-items:center;">
+        <button class="btn btn-success" id="genInventoryBtn" onclick="generateInventoryXML()" disabled>生成清单报文(CEB603)</button>
+        <button class="btn btn-warning" id="genOrderBtn" onclick="generateOrderFromInventoryXML()" disabled>生成订单报文(CEB303)</button>
+    </span>
     <label style="margin-left:15px;">3.</label>
     <button class="btn btn-primary" id="dlBtn" onclick="downloadXML()" disabled>下载 XML</button>
 </div>
@@ -100,8 +105,9 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
             const wb = XLSX.read(ev.target.result, { type: 'array' });
             excelData = wb;
             showPreview(wb);
-            document.getElementById('genBtn').disabled = false;
-            setStatus('Excel 文件读取成功，请点击"生成清单报文"', 'ok');
+            document.getElementById('genInventoryBtn').disabled = false;
+            document.getElementById('genOrderBtn').disabled = false;
+            setStatus('Excel 文件读取成功，请选择"生成清单报文(CEB603)"或"生成订单报文(CEB303)"', 'ok');
         } catch (err) {
             setStatus('读取失败: ' + err.message, 'err');
         }
@@ -207,23 +213,28 @@ function showPreview(wb) {
     const det = detectType(wb);
     const type = det.type;
     const badge = document.getElementById('typeBadge');
-    const genBtn = document.getElementById('genBtn');
+    const genInventoryBtn = document.getElementById('genInventoryBtn');
+    const genOrderBtn = document.getElementById('genOrderBtn');
+    // 重置按钮
+    genInventoryBtn.disabled = true;
+    genOrderBtn.disabled = true;
     if (type === 'order') {
         badge.className = 'type-badge order';
-        badge.textContent = '已识别：订单 CEB303';
-        genBtn.textContent = '生成订单报文';
+        badge.textContent = '已识别：订单模板 CEB303';
+        genInventoryBtn.disabled = false;
+        genOrderBtn.disabled = false;
         window._detectedType = 'order';
         window._detect = det;
     } else if (type === 'inventory') {
         badge.className = 'type-badge inventory';
-        badge.textContent = '已识别：清单 CEB603';
-        genBtn.textContent = '生成清单报文';
+        badge.textContent = '已识别：清单模板 CEB603';
+        genInventoryBtn.disabled = false;
+        genOrderBtn.disabled = false;
         window._detectedType = 'inventory';
         window._detect = det;
     } else {
         badge.className = '';
-        badge.textContent = '';
-        genBtn.textContent = '生成报文';
+        badge.textContent = '未识别';
         window._detectedType = null;
     }
     let html = '';
@@ -795,6 +806,211 @@ function generateInventoryXML() {
         `按每批 ≤${BATCH_LIMIT} 单拆分为 ${totalBatches} 份报文。空值字段已自动删除。`,
         'ok'
     );
+}
+/**
+ * 从「清单模板」生成订单报文 CEB303
+ * 使用同一份清单模板（清单表头 + 清单商品明细 + 传输信息），
+ * 将清单字段映射为订单报文（CEB303）字段。
+ *
+ * 映射关系：
+ *   OrderHead:
+ *     orderType  → 固定 'E'（出口）
+ *     orderNo    → orderNo
+ *     ebpCode    → ebpCode
+ *     ebpName    → ebpName
+ *     ebcCode    → agentCode（申报单位代码）
+ *     ebcName    → agentName（申报单位名称）
+ *     goodsValue  → 该订单下所有商品 totalPrice 之和
+ *     freight    → 固定 '0'
+ *     currency   → 固定 '142'（人民币）
+ *     note       → note
+ *   OrderList:
+ *     gnum       → gnum
+ *     itemNo     → itemNo
+ *     itemName   → gname（申报用商品名称）
+ *     itemDescribe → gmodel（商品规格型号）
+ *     barCode    → barCode
+ *     unit       → unit
+ *     currency   → currency（默认 142）
+ *     qty        → qty
+ *     price      → price
+ *     totalPrice → totalPrice
+ *     note       → note
+ *
+ * 校验：与清单报文一致（agentCode 客户列表校验 + 必填项校验 + itemNo 校验）
+ * 拆分：每批 ≤99 单
+ */
+function generateOrderFromInventoryXML() {
+    const heads = readSheet(excelData, '清单表头', 4);
+    const lists = readSheet(excelData, '清单商品明细', 4);
+    const transfers = readSheet(excelData, '传输信息', 4);
+    if (!heads.length) throw new Error('清单表头无数据');
+    if (!lists.length) throw new Error('清单商品明细无数据');
+    if (!transfers.length) throw new Error('传输信息无数据');
+    // ===== 校验 agentCode 是否都在客户列表 clients.csv 中 =====
+    const agentErrors = validateAgentCode(heads);
+    // ===== 必填项校验（复用清单模板的校验规则）=====
+    const dataBySheet = { '清单表头': heads, '清单商品明细': lists, '传输信息': transfers };
+    const requiredErrors = validateRequired(dataBySheet);
+    // ===== 校验 itemNo：禁止俄语 / 禁止超 20 字符 =====
+    const itemNoErrors = validateAllItemNo(heads, lists);
+    // 任一校验不通过 → 合并提示，中止报文生成
+    if (agentErrors.length || requiredErrors.length || itemNoErrors.length) {
+        const parts = [];
+        if (agentErrors.length) {
+            parts.push(formatAgentErrors(agentErrors));
+        }
+        if (requiredErrors.length) {
+            parts.push('【必填项缺失】\n' + formatRequiredErrors(requiredErrors));
+        }
+        if (itemNoErrors.length) {
+            const byOrder = {};
+            itemNoErrors.forEach(e => {
+                if (!byOrder[e.orderNo]) byOrder[e.orderNo] = [];
+                byOrder[e.orderNo].push(e);
+            });
+            const lines = Object.keys(byOrder).map(orderNo => {
+                const items = byOrder[orderNo].map(e => {
+                    const gnum = e.gnum ? `第${e.gnum}项` : '某项';
+                    return `${gnum}「${e.itemNo}」(${e.reasons.join('、')})`;
+                }).join('；');
+                return `  订单 ${orderNo}：${items}`;
+            });
+            parts.push(
+                `【itemNo 不合法】共 ${itemNoErrors.length} 条明细的 itemNo 含俄语或超 20 字符，` +
+                `涉及 ${Object.keys(byOrder).length} 个订单：\n` +
+                lines.join('\n')
+            );
+        }
+        const totalIssues = requiredErrors.length + agentErrors.length + itemNoErrors.length;
+        const msg =
+            `❌ 校验未通过：共发现 ${totalIssues} 处问题，请修改后重试，本次未生成报文。\n\n` +
+            parts.join('\n\n');
+        batchXMLs = [];
+        renderPreview();
+        document.getElementById('dlBtn').disabled = true;
+        setStatus(msg, 'err');
+        return;
+    }
+    // 按 orderNo 将明细分组
+    const listMap = {};
+    lists.forEach(row => {
+        const orderNo = row.orderNo || '';
+        if (!orderNo) return;
+        if (!listMap[orderNo]) listMap[orderNo] = [];
+        listMap[orderNo].push(row);
+    });
+    // ===== 计算每单商品总价之和（goodsValue）=====
+    const goodsValueMap = {};
+    heads.forEach(head => {
+        const orderNo = head.orderNo || '';
+        if (!orderNo) return;
+        const orderLists = listMap[orderNo] || [];
+        let sum = 0;
+        orderLists.forEach(item => {
+            const v = parseFloat(item.totalPrice);
+            if (!isNaN(v)) sum += v;
+        });
+        // 保留 2 位小数
+        goodsValueMap[orderNo] = sum.toFixed(2);
+    });
+    // ===== 按每批 ≤99 单拆分 =====
+    batchXMLs = [];
+    const totalOrders = heads.length;
+    for (let i = 0; i < totalOrders; i += BATCH_LIMIT) {
+        const batchHeads = heads.slice(i, i + BATCH_LIMIT);
+        const xml = buildOrderFromInventoryXML(batchHeads, listMap, transfers, goodsValueMap);
+        const batchNo = batchXMLs.length + 1;
+        const start = i + 1, end = Math.min(i + BATCH_LIMIT, totalOrders);
+        batchXMLs.push({
+            name: `CEB303Message_${String(batchNo).padStart(3, '0')}_订单${start}-${end}.xml`,
+            xml: xml
+        });
+    }
+    renderPreview();
+    const totalBatches = batchXMLs.length;
+    document.getElementById('dlBtn').disabled = false;
+    setStatus(
+        `✅ 订单报文（CEB303）生成成功！共 ${totalOrders} 个订单（含 ${lists.length} 条商品明细），` +
+        `按每批 ≤${BATCH_LIMIT} 单拆分为 ${totalBatches} 份报文。空值字段已自动删除。`,
+        'ok'
+    );
+}
+/**
+ * 构建一份 CEB303 订单报文（从清单模板数据转换而来）
+ * 节点顺序与 CEB303 样例一致；空值字段不生成节点。
+ */
+function buildOrderFromInventoryXML(batchHeads, listMap, transfers, goodsValueMap) {
+    const msgGuid = generateGUID();
+    let xml = '<?xml version="1.0" encoding="utf-8"?>\n';
+    xml += '<CEB303Message ';
+    xml += 'xmlns="http://www.chinaport.gov.cn/ceb" ';
+    xml += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ';
+    xml += `guid="${msgGuid}" `;
+    xml += 'version="1.0">\n';
+    batchHeads.forEach(head => {
+        const orderNo = head.orderNo || '';
+        // ===== 自动派生字段 =====
+        const itemGuid  = generateGUID();
+        const appType   = '1';        // 1=新增
+        const appTime   = now14();    // 当前时间 14 位
+        const appStatus = '2';        // 2=申报
+        const orderType = 'E';        // E=出口
+        const ebcCode   = head.agentCode || '';   // 申报单位代码 → 电商企业编号
+        const ebcName   = head.agentName || '';   // 申报单位名称 → 电商企业名称
+        const goodsValue = goodsValueMap[orderNo] || '0.00';
+        const freight   = '0';        // 固定 0
+        const currency  = '142';      // 固定 142=人民币
+        xml += '    <Order>\n';
+        xml += '        <OrderHead>\n';
+        xml += cdataNode('guid',       itemGuid,        12);
+        xml += cdataNode('appType',    appType,         12);
+        xml += cdataNode('appTime',    appTime,         12);
+        xml += cdataNode('appStatus',  appStatus,       12);
+        xml += cdataNode('orderType',  orderType,       12);
+        xml += cdataNode('orderNo',    orderNo,         12);
+        xml += cdataNode('ebpCode',    head.ebpCode,    12);
+        xml += cdataNode('ebpName',    head.ebpName,    12);
+        xml += cdataNode('ebcCode',    ebcCode,         12);
+        xml += cdataNode('ebcName',    ebcName,         12);
+        xml += cdataNode('goodsValue', goodsValue,      12);
+        xml += cdataNode('freight',    freight,         12);
+        xml += cdataNode('currency',   currency,        12);
+        xml += cdataNode('note',       head.note,       12);
+        xml += '        </OrderHead>\n';
+        // ===== 订单商品明细 =====
+        const orderLists = listMap[orderNo] || [];
+        orderLists.forEach(item => {
+            xml += '        <OrderList>\n';
+            xml += cdataNode('gnum',         item.gnum,        12);
+            xml += cdataNode('itemNo',       item.itemNo,      12);
+            xml += cdataNode('itemName',     item.gname,       12);  // 申报用商品名称
+            xml += cdataNode('itemDescribe', item.gmodel,      12);  // 商品规格型号
+            xml += cdataNode('barCode',      item.barCode,     12);
+            xml += cdataNode('unit',         item.unit,        12);
+            xml += cdataNode('currency',     item.currency !== '' ? item.currency : '142', 12);
+            xml += cdataNode('qty',          item.qty,         12);
+            xml += cdataNode('price',        item.price,       12);
+            xml += cdataNode('totalPrice',   item.totalPrice,  12);
+            xml += cdataNode('note',         item.note,        12);
+            xml += '        </OrderList>\n';
+        });
+        xml += '    </Order>\n';
+    });
+    // ===== BaseTransfer =====
+    const trans = transfers[0] || {};
+    const transChildren = [
+        cdataNode('copCode',  trans.copCode,  8),
+        cdataNode('copName',  trans.copName,  8),
+        cdataNode('dxpMode',  trans.dxpMode,  8),
+        cdataNode('dxpId',    trans.dxpId,    8),
+        cdataNode('note',     trans.note,     8)
+    ].join('');
+    if (transChildren) {
+        xml += '    <BaseTransfer>\n' + transChildren + '    </BaseTransfer>\n';
+    }
+    xml += '</CEB303Message>\n';
+    return xml;
 }
 /**
  * 生成订单报文 CEB303（不做客户校验，仅做必填项 + itemNo 校验）
