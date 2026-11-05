@@ -284,6 +284,17 @@ function cdataNode(name, val, indent) {
 function escapeCdata(str) {
     return str.includes(']]>') ? str.replace(/\]\]>/g, ']]&gt;') : str;
 }
+/**
+ * 生成不带 ceb: 前缀的 CDATA 节点（专供 CEB303 订单报文使用）
+ * CEB303 根节点使用默认命名空间 xmlns="http://www.chinaport.gov.cn/ceb"，
+ * 因此内部节点不能带 ceb: 前缀，否则会报"前缀未绑定"错误。
+ */
+function cdataNodeNoPrefix(name, val, indent) {
+    if (val === '' || val === undefined || val === null) return '';
+    const pad = ' '.repeat(indent);
+    const escaped = escapeCdata(String(val));
+    return `${pad}<${name}><![CDATA[${escaped}]]></${name}>\n`;
+}
 /** 14 位时间戳 yyyyMMddHHmmss */
 function now14() {
     const d = new Date();
@@ -494,36 +505,36 @@ function buildOrderMessageXML(batchHeads, listMap, transfers) {
         xml += '    <Order>\n';
         xml += '        <OrderHead>\n';
         // ===== 订单表头字段（按样例节点顺序）=====
-        xml += cdataNode('guid',       itemGuid,           12);
-        xml += cdataNode('appType',    appType,            12);
-        xml += cdataNode('appTime',    appTime,            12);
-        xml += cdataNode('appStatus',  appStatus,          12);
-        xml += cdataNode('orderType',  head.orderType,     12);
-        xml += cdataNode('orderNo',    orderNo,            12);
-        xml += cdataNode('ebpCode',    head.ebpCode,       12);
-        xml += cdataNode('ebpName',    head.ebpName,       12);
-        xml += cdataNode('ebcCode',    head.ebcCode,       12);
-        xml += cdataNode('ebcName',    head.ebcName,       12);
-        xml += cdataNode('goodsValue', head.goodsValue,    12);
-        xml += cdataNode('freight',    head.freight,       12);
-        xml += cdataNode('currency',   head.currency,      12);
-        xml += cdataNode('note',       head.note,          12);
+        xml += cdataNodeNoPrefix('guid',       itemGuid,           12);
+        xml += cdataNodeNoPrefix('appType',    appType,            12);
+        xml += cdataNodeNoPrefix('appTime',    appTime,            12);
+        xml += cdataNodeNoPrefix('appStatus',  appStatus,          12);
+        xml += cdataNodeNoPrefix('orderType',  head.orderType,     12);
+        xml += cdataNodeNoPrefix('orderNo',    orderNo,            12);
+        xml += cdataNodeNoPrefix('ebpCode',    head.ebpCode,       12);
+        xml += cdataNodeNoPrefix('ebpName',    head.ebpName,       12);
+        xml += cdataNodeNoPrefix('ebcCode',    head.ebcCode,       12);
+        xml += cdataNodeNoPrefix('ebcName',    head.ebcName,       12);
+        xml += cdataNodeNoPrefix('goodsValue', head.goodsValue,    12);
+        xml += cdataNodeNoPrefix('freight',    head.freight,       12);
+        xml += cdataNodeNoPrefix('currency',   head.currency,      12);
+        xml += cdataNodeNoPrefix('note',       head.note,          12);
         xml += '        </OrderHead>\n';
         // ===== 订单商品明细 =====
         const orderLists = listMap[orderNo] || [];
         orderLists.forEach(item => {
             xml += '        <OrderList>\n';
-            xml += cdataNode('gnum',        item.gnum,        12);
-            xml += cdataNode('itemNo',      item.itemNo,      12);
-            xml += cdataNode('itemName',    item.itemName,    12);
-            xml += cdataNode('itemDescribe',item.itemDescribe,12);
-            xml += cdataNode('barCode',     item.barCode,     12);
-            xml += cdataNode('unit',        item.unit,        12);
-            xml += cdataNode('currency',    item.currency,    12);
-            xml += cdataNode('qty',         item.qty,         12);
-            xml += cdataNode('price',       item.price,       12);
-            xml += cdataNode('totalPrice',  item.totalPrice,  12);
-            xml += cdataNode('note',        item.note,        12);
+            xml += cdataNodeNoPrefix('gnum',        item.gnum,        12);
+            xml += cdataNodeNoPrefix('itemNo',      item.itemNo,      12);
+            xml += cdataNodeNoPrefix('itemName',    item.itemName,    12);
+            xml += cdataNodeNoPrefix('itemDescribe',item.itemDescribe,12);
+            xml += cdataNodeNoPrefix('barCode',     item.barCode,     12);
+            xml += cdataNodeNoPrefix('unit',        item.unit,        12);
+            xml += cdataNodeNoPrefix('currency',    item.currency,    12);
+            xml += cdataNodeNoPrefix('qty',         item.qty,         12);
+            xml += cdataNodeNoPrefix('price',       item.price,       12);
+            xml += cdataNodeNoPrefix('totalPrice',  item.totalPrice,  12);
+            xml += cdataNodeNoPrefix('note',        item.note,        12);
             xml += '        </OrderList>\n';
         });
         xml += '    </Order>\n';
@@ -531,17 +542,16 @@ function buildOrderMessageXML(batchHeads, listMap, transfers) {
     // ===== BaseTransfer（有传输信息才生成，避免空壳标签） =====
     const trans = transfers[0] || {};
     const transChildren = [
-        cdataNode('copCode',  trans.copCode,  8),
-        cdataNode('copName',  trans.copName,  8),
-        cdataNode('dxpMode',  trans.dxpMode,  8),
-        cdataNode('dxpId',    trans.dxpId,    8),
-        cdataNode('note',     trans.note,     8)
+        cdataNodeNoPrefix('copCode',  trans.copCode,  8),
+        cdataNodeNoPrefix('copName',  trans.copName,  8),
+        cdataNodeNoPrefix('dxpMode',  trans.dxpMode,  8),
+        cdataNodeNoPrefix('dxpId',    trans.dxpId,    8),
+        cdataNodeNoPrefix('note',     trans.note,     8)
     ].join('');
     if (transChildren) {
         xml += '    <BaseTransfer>\n' + transChildren + '    </BaseTransfer>\n';
     }
     xml += '</CEB303Message>\n';
-    return xml;
     return xml;
 }
 /**
@@ -963,36 +973,36 @@ function buildOrderFromInventoryXML(batchHeads, listMap, transfers, goodsValueMa
         const currency  = '142';      // 固定 142=人民币
         xml += '    <Order>\n';
         xml += '        <OrderHead>\n';
-        xml += cdataNode('guid',       itemGuid,        12);
-        xml += cdataNode('appType',    appType,         12);
-        xml += cdataNode('appTime',    appTime,         12);
-        xml += cdataNode('appStatus',  appStatus,       12);
-        xml += cdataNode('orderType',  orderType,       12);
-        xml += cdataNode('orderNo',    orderNo,         12);
-        xml += cdataNode('ebpCode',    head.ebpCode,    12);
-        xml += cdataNode('ebpName',    head.ebpName,    12);
-        xml += cdataNode('ebcCode',    ebcCode,         12);
-        xml += cdataNode('ebcName',    ebcName,         12);
-        xml += cdataNode('goodsValue', goodsValue,      12);
-        xml += cdataNode('freight',    freight,         12);
-        xml += cdataNode('currency',   currency,        12);
-        xml += cdataNode('note',       head.note,       12);
+        xml += cdataNodeNoPrefix('guid',       itemGuid,        12);
+        xml += cdataNodeNoPrefix('appType',    appType,         12);
+        xml += cdataNodeNoPrefix('appTime',    appTime,         12);
+        xml += cdataNodeNoPrefix('appStatus',  appStatus,       12);
+        xml += cdataNodeNoPrefix('orderType',  orderType,       12);
+        xml += cdataNodeNoPrefix('orderNo',    orderNo,         12);
+        xml += cdataNodeNoPrefix('ebpCode',    head.ebpCode,    12);
+        xml += cdataNodeNoPrefix('ebpName',    head.ebpName,    12);
+        xml += cdataNodeNoPrefix('ebcCode',    ebcCode,         12);
+        xml += cdataNodeNoPrefix('ebcName',    ebcName,         12);
+        xml += cdataNodeNoPrefix('goodsValue', goodsValue,      12);
+        xml += cdataNodeNoPrefix('freight',    freight,         12);
+        xml += cdataNodeNoPrefix('currency',   currency,        12);
+        xml += cdataNodeNoPrefix('note',       head.note,       12);
         xml += '        </OrderHead>\n';
         // ===== 订单商品明细 =====
         const orderLists = listMap[orderNo] || [];
         orderLists.forEach(item => {
             xml += '        <OrderList>\n';
-            xml += cdataNode('gnum',         item.gnum,        12);
-            xml += cdataNode('itemNo',       item.itemNo,      12);
-            xml += cdataNode('itemName',     item.gname,       12);  // 申报用商品名称
-            xml += cdataNode('itemDescribe', item.gmodel,      12);  // 商品规格型号
-            xml += cdataNode('barCode',      item.barCode,     12);
-            xml += cdataNode('unit',         item.unit,        12);
-            xml += cdataNode('currency',     item.currency !== '' ? item.currency : '142', 12);
-            xml += cdataNode('qty',          item.qty,         12);
-            xml += cdataNode('price',        item.price,       12);
-            xml += cdataNode('totalPrice',   item.totalPrice,  12);
-            xml += cdataNode('note',         item.note,        12);
+            xml += cdataNodeNoPrefix('gnum',         item.gnum,        12);
+            xml += cdataNodeNoPrefix('itemNo',       item.itemNo,      12);
+            xml += cdataNodeNoPrefix('itemName',     item.gname,       12);  // 申报用商品名称
+            xml += cdataNodeNoPrefix('itemDescribe', item.gmodel,      12);  // 商品规格型号
+            xml += cdataNodeNoPrefix('barCode',      item.barCode,     12);
+            xml += cdataNodeNoPrefix('unit',         item.unit,        12);
+            xml += cdataNodeNoPrefix('currency',     item.currency !== '' ? item.currency : '142', 12);
+            xml += cdataNodeNoPrefix('qty',          item.qty,         12);
+            xml += cdataNodeNoPrefix('price',        item.price,       12);
+            xml += cdataNodeNoPrefix('totalPrice',   item.totalPrice,  12);
+            xml += cdataNodeNoPrefix('note',         item.note,        12);
             xml += '        </OrderList>\n';
         });
         xml += '    </Order>\n';
@@ -1000,11 +1010,11 @@ function buildOrderFromInventoryXML(batchHeads, listMap, transfers, goodsValueMa
     // ===== BaseTransfer =====
     const trans = transfers[0] || {};
     const transChildren = [
-        cdataNode('copCode',  trans.copCode,  8),
-        cdataNode('copName',  trans.copName,  8),
-        cdataNode('dxpMode',  trans.dxpMode,  8),
-        cdataNode('dxpId',    trans.dxpId,    8),
-        cdataNode('note',     trans.note,     8)
+        cdataNodeNoPrefix('copCode',  trans.copCode,  8),
+        cdataNodeNoPrefix('copName',  trans.copName,  8),
+        cdataNodeNoPrefix('dxpMode',  trans.dxpMode,  8),
+        cdataNodeNoPrefix('dxpId',    trans.dxpId,    8),
+        cdataNodeNoPrefix('note',     trans.note,     8)
     ].join('');
     if (transChildren) {
         xml += '    <BaseTransfer>\n' + transChildren + '    </BaseTransfer>\n';
